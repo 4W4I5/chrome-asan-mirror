@@ -1,0 +1,41 @@
+# ASAN Chrome Mirror Configuration
+
+# Storage and paths
+storage_dir: /storage
+log_dir: /var/log/asan-chrome-mirror
+data_dir: ./data
+
+# Version discovery - probe range for available builds
+# The downloader will probe from max_version backwards, then min_version forwards
+# Current Chrome version (May 2026) is around 146
+# This will search 150 backwards to 140, then forward to 160
+min_version: 140
+max_version: 160
+
+# Scheduling - check interval in seconds (default: 300 = 5 minutes for testing, use 43200 for production = 12 hours)
+check_interval_seconds: 300
+
+# HTTP server configuration
+http_host: 0.0.0.0
+http_port: 8000
+
+# Retry policy
+# Maximum number of retry attempts per download
+max_retries: 5
+# Base for exponential backoff: wait 2^(attempt-1) seconds between retries
+# Backoff sequence: 1s, 2s, 4s, 8s, 16s (capped at 32s)
+retry_backoff_base: 2
+
+# Download timeout in seconds (default: 3600 = 1 hour)
+download_timeout_seconds: 3600
+
+# If a build stays in progress longer than this, treat it as stale and allow a retry
+in_progress_timeout_seconds: 1800
+
+# Logging
+# Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+logging_level: INFO
+# Maximum size of log file before rotation (default: 10MB)
+log_max_bytes: 10485760
+# Number of backup log files to keep
+log_backup_count: 5

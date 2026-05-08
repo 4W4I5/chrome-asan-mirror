@@ -1,0 +1,42 @@
+[Unit]
+Description=ASAN Chrome Mirror - Chromium ASAN Build Mirror Service
+Documentation=https://chromium.googlesource.com/chromium/src/+/refs/heads/main/tools/get_asan_chrome/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=asan-mirror
+Group=asan-mirror
+
+# Working directory
+WorkingDirectory=/opt/asan-chrome-mirror
+
+# Start command - runs main.py from the app module
+ExecStart=/usr/bin/python3 -m app.main
+
+# Restart policy
+Restart=on-failure
+RestartSec=30
+StartLimitInterval=600
+StartLimitBurst=5
+
+# Service timeout
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=asan-chrome-mirror
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=yes
+
+# Resource limits (optional)
+MemoryMax=2G
+CPUQuota=80%
+
+[Install]
+WantedBy=multi-user.target
