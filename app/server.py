@@ -426,6 +426,19 @@ def create_app(
                 </div>
 
                 <div class="stats">
+                    <h2>Automatic Probing</h2>
+                    <p style="color: #666; margin-bottom: 18px; line-height: 1.5;">
+                        Enable automatic probing to have the service discover and download new ASAN Chromium versions on every scheduled check cycle (every 12 hours). When disabled, only manual downloads are available.
+                    </p>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <button id="toggle-auto-probing" class="btn" style="background: #f44336; padding: 12px 30px; height: auto;" data-enabled="false">
+                            <span>🔴 Auto-Probing: OFF</span>
+                        </button>
+                        <span id="toggle-status" style="color: #999; font-size: 0.95em;">Initializing...</span>
+                    </div>
+                </div>
+                
+                <div class="stats">
                     <h2>Manual Download</h2>
                     <p style="color: #666; margin-bottom: 18px; line-height: 1.5;">
                         Enter a Chromium version and OS to start a separate get_asan_chrome.py download in the background.
@@ -472,12 +485,89 @@ def create_app(
                         <span class="stat-label">API Endpoints</span>
                         <span class="stat-value"><a href="/docs">/docs</a> | <a href="/health">/health</a> | <a href="/metrics">/metrics</a></span>
                     </div>
+                    <div style="margin-top: 12px; display:flex; gap:12px; align-items:center;">
+                        <button id="run-check-now" class="btn" style="background:#2196F3; padding:10px 18px;">▶ Run Check Now</button>
+                        <span id="run-check-status" style="color:#666; font-size:0.95em;">No manual run requested</span>
+                    </div>
                 </div>
             </div>
             <script>
+                const toggleBtn = document.getElementById('toggle-auto-probing');
+                const toggleStatus = document.getElementById('toggle-status');
                 const manualDownloadForm = document.getElementById('manual-download-form');
                 const manualDownloadStatus = document.getElementById('manual-download-status');
                 const progressContent = document.getElementById('progress-content');
+
+                async function loadAutoProbeStatus() {
+                    try {
+                        const response = await fetch('/api/config/auto-probing');
+                        if (!response.ok) throw new Error('Failed to load status');
+                        const data = await response.json();
+                        updateToggleUI(data.enable_auto_probing);
+                    } catch (error) {
+                        console.error(error);
+                        toggleStatus.textContent = 'Error loading status';
+                    }
+                }
+
+                function updateToggleUI(enabled) {
+                    toggleBtn.dataset.enabled = String(enabled);
+                    if (enabled) {
+                        toggleBtn.style.background = '#4CAF50';
+                        toggleBtn.innerHTML = '<span>🟢 Auto-Probing: ON</span>';
+                        toggleStatus.textContent = 'Service will automatically probe and download on next check cycle';
+                    } else {
+                        toggleBtn.style.background = '#f44336';
+                        toggleBtn.innerHTML = '<span>🔴 Auto-Probing: OFF</span>';
+                        toggleStatus.textContent = 'Only manual downloads are enabled';
+                    }
+                }
+
+                toggleBtn.addEventListener('click', async () => {
+                    const currentState = toggleBtn.dataset.enabled === 'true';
+                    const newState = !currentState;
+                    toggleBtn.disabled = true;
+                    try {
+                        const response = await fetch('/api/config/auto-probing', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enable: newState })
+                        });
+                        if (!response.ok) throw new Error('Failed to update status');
+                        const data = await response.json();
+                        updateToggleUI(data.enable_auto_probing);
+                    } catch (error) {
+                        console.error(error);
+                        toggleStatus.textContent = 'Error updating status';
+                    } finally {
+                        toggleBtn.disabled = false;
+                    }
+                });
+
+                loadAutoProbeStatus();
+
+                // Run Check Now button
+                const runCheckBtn = document.getElementById('run-check-now');
+                const runCheckStatus = document.getElementById('run-check-status');
+                if (runCheckBtn) {
+                    runCheckBtn.addEventListener('click', async () => {
+                        runCheckBtn.disabled = true;
+                        runCheckStatus.textContent = 'Scheduling check...';
+                        try {
+                            const resp = await fetch('/api/scheduler/run-now', { method: 'POST' });
+                            const data = await resp.json();
+                            if (!resp.ok) throw new Error(data.detail || data.message || 'Failed to schedule');
+                            runCheckStatus.textContent = data.message || 'Check scheduled';
+                            await refreshStatus();
+                        } catch (err) {
+                            console.error(err);
+                            runCheckStatus.textContent = err.message || 'Error scheduling check';
+                        } finally {
+                            runCheckBtn.disabled = false;
+                            setTimeout(() => { runCheckStatus.textContent = 'No manual run requested'; }, 8000);
+                        }
+                    });
+                }
 
                 function escapeHtml(value) {
                     return String(value)
@@ -594,6 +684,7 @@ def create_app(
 
                 refreshStatus();
                 setInterval(refreshStatus, 5000);
+                setInterval(loadAutoProbeStatus, 30000);
             </script>
         </body>
         </html>
@@ -681,6 +772,36 @@ def create_app(
             "os": request.os
         }
     
+    @app.get("/api/config/auto-probing", response_class=JSONResponse)
+    async def get_auto_probing_status() -> dict:
+        """Get the current auto-probing toggle state."""
+        return {
+            "enable_auto_probing": config.enable_auto_probing
+        }
+    
+    @app.post("/api/config/auto-probing", response_class=JSONResponse)
+    async def set_auto_probing_status(payload: dict) -> dict:
+        """Set the auto-probing toggle state."""
+        enable = payload.get("enable", False)
+        config.enable_auto_probing = enable
+        logger.info(f"Auto-probing toggled to: {enable}")
+        return {
+            "enable_auto_probing": config.enable_auto_probing,
+            "message": f"Auto-probing is now {('enabled' if enable else 'disabled')}"
+        }
+    
+    @app.post("/api/scheduler/run-now", response_class=JSONResponse)
+    async def trigger_scheduler_run() -> dict:
+        """Trigger the scheduler to run a check cycle immediately."""
+        if scheduler is None:
+            raise HTTPException(status_code=503, detail="Scheduler is not available")
+
+        # Schedule the check to run in background
+        task = asyncio.create_task(scheduler.run_check())
+        track_background_task(task)
+        logger.info("Manual scheduler run requested via API")
+        return {"status": "queued", "message": "Scheduled check cycle started"}
+
     def generate_directory_listing(directory: Path, url_prefix: str) -> str:
         """
         Generate HTML directory listing.

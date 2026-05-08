@@ -29,6 +29,11 @@ retry_backoff_base: 2
 # Download timeout in seconds (default: 3600 = 1 hour)
 download_timeout_seconds: 3600
 
+# Auto-probing and download (default: false = disabled)
+# When enabled, the service will automatically probe for new versions and download them
+# on every check cycle. Can be toggled via the dashboard.
+enable_auto_probing: false
+
 # If a build stays in progress longer than this, treat it as stale and allow a retry
 in_progress_timeout_seconds: 1800
 

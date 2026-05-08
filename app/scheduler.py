@@ -103,18 +103,76 @@ class Scheduler:
         except Exception as e:
             logger.error(f"Error logging statistics: {e}")
     
+    async def _probe_and_download(self) -> None:
+        """
+        Probe for new versions and queue downloads.
+        """
+        try:
+            logger.info("\nSTEP 2: Probing for new versions...")
+            available = self.downloader.probe_versions(
+                "linux",
+                self.config.min_version,
+                self.config.max_version
+            )
+            logger.info(f"Found {len(available)} available versions for linux")
+            
+            available_win64 = self.downloader.probe_versions(
+                "win64",
+                self.config.min_version,
+                self.config.max_version
+            )
+            logger.info(f"Found {len(available_win64)} available versions for win64")
+            
+            # Queue downloads for new versions
+            for os_name, versions in [("linux", available), ("win64", available_win64)]:
+                for version in versions:
+                    existing = self.db.get_build(version, os_name)
+                    if existing and existing.status == DownloadStatus.SUCCESS:
+                        logger.info(f"✓ {version}/{os_name} already downloaded")
+                        continue
+                    
+                    if existing and existing.status == DownloadStatus.IN_PROGRESS:
+                        logger.info(f"↻ {version}/{os_name} already in progress")
+                        continue
+                    
+                    # Insert new entry or ignore if already pending
+                    if not existing:
+                        from app.database import Build
+                        self.db.insert_build(Build(
+                            version=version,
+                            os=os_name,
+                            filepath=self.downloader._get_output_path(version, os_name),
+                            status=DownloadStatus.IN_PROGRESS
+                        ))
+                    
+                    logger.info(f"→ Queued download: {version}/{os_name}")
+                    
+                    # Download in background
+                    result = self.downloader.download(version, os_name)
+                    if result.success:
+                        self.db.mark_success(version, os_name, result.checksum)
+                        logger.info(f"✓ Downloaded: {version}/{os_name}")
+                    else:
+                        self.db.mark_failed(version, os_name, result.error, 0)
+                        logger.warning(f"✗ Failed to download {version}/{os_name}: {result.error}")
+        
+        except Exception as e:
+            logger.error(f"Error during probing and download: {e}", exc_info=True)
+    
     async def run_check(self) -> None:
         """
         Run a single check cycle:
         1. Update script
-        2. Clean temp files
-        3. Log statistics
+        2. Probe and download (if enabled)
+        3. Clean temp files
+        4. Log statistics
         """
         logger.info("=" * 60)
         logger.info("Starting check cycle")
         logger.info("=" * 60)
         logger.info(f"Storage: {self.config.storage_dir}")
         logger.info(f"Data: {self.config.data_dir}")
+        logger.info(f"Auto-probing enabled: {self.config.enable_auto_probing}")
         
         self._last_check = datetime.utcnow()
         
@@ -133,16 +191,20 @@ class Scheduler:
             logger.info(f"✓ Script is executable: {os.access(script_path, os.X_OK)}")
             logger.info(f"✓ Script size: {script_path.stat().st_size if script_path.exists() else 'N/A'} bytes")
             
-            logger.info("Automatic probing/downloads are disabled; dashboard downloads only")
+            # Step 2: Probe and download (conditional on toggle)
+            if self.config.enable_auto_probing:
+                await self._probe_and_download()
+            else:
+                logger.info("Automatic probing is disabled (toggle OFF); dashboard downloads only")
             
-            # Step 2: Clean temp files
+            # Step 3: Clean temp files
             await self._cleanup_temp_files()
             
-            # Step 3: Log statistics
+            # Step 4: Log statistics
             await self._log_statistics()
             
             logger.info("=" * 60)
-            logger.info("Check cycle completed: maintenance-only run")
+            logger.info("Check cycle completed")
             logger.info("=" * 60)
         
         except Exception as e:

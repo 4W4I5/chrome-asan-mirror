@@ -18,8 +18,8 @@ class Config(BaseModel):
     data_dir: Path = Field(default=Path("./data"), description="Directory for application data (SQLite)")
     
     # Version discovery
-    min_version: int = Field(default=140, description="Minimum Chromium version to probe")
-    max_version: int = Field(default=160, description="Maximum Chromium version to probe")
+    min_version: int = Field(default=130, description="Minimum Chromium version to probe")
+    max_version: int = Field(default=170, description="Maximum Chromium version to probe")
     
     # Scheduling
     check_interval_seconds: int = Field(default=43200, description="Seconds between checks (12 hours)")
@@ -35,6 +35,7 @@ class Config(BaseModel):
     # Download behavior
     download_timeout_seconds: int = Field(default=3600, description="Timeout per download (1 hour)")
     in_progress_timeout_seconds: int = Field(default=1800, description="Age in seconds after which an in-progress build is treated as stale")
+    enable_auto_probing: bool = Field(default=False, description="Enable automatic probing and downloading of versions")
     
     # Logging
     logging_level: str = Field(default="INFO", description="Logging level (DEBUG, INFO, WARNING, ERROR)")
